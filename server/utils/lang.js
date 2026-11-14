@@ -1,32 +1,54 @@
-# CodeGuru
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
 
-CodeGuru is a universal AI-powered programming platform that supports writing, conversion, execution, visualization, explanation, and review across multiple programming languages.
+import { executeCode } from './utils/executor.js';
+import { detectLanguage } from './utils/lang.js';
+import { generateAnalysis, generateReview, generateExplanation, convertCode } from './utils/ai.js';
 
-## Features
+dotenv.config();
 
-- Monaco-based universal code editor with multi-file support
-- Multi-language detection and switching
-- Code execution for supported runtimes with timeout protection
-- Static analysis + runtime output display
-- AI conversion and review flows with safe fallback heuristics
-- Visualization panels for execution flow and memory concepts
-- Learning-focused UI for beginners and advanced developers
+const app = express();
+const PORT = Number(process.env.PORT) || 3001;
 
-## Run locally
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
 
-```bash
-npm install
-cp .env.example .env
-npm run dev
-```
+app.get('/api/health', (_, res) => {
+  res.json({ ok: true, status: 'healthy' });
+});
 
-Then open the Vite app at `http://localhost:5173`.
+app.post('/api/analyze', async (req, res) => {
+  const { code = '', language = 'auto', fileName = 'main.py' } = req.body || {};
+  const result = await generateAnalysis({ code, language, fileName });
+  res.json(result);
+});
 
-## Environment
+app.post('/api/execute', async (req, res) => {
+  const { code = '', language = 'auto', input = '', fileName = 'main.py' } = req.body || {};
+  const targetLanguage = language && language !== 'auto' ? language : detectLanguage(code, fileName);
+  const result = await executeCode({ code, language: targetLanguage, input, fileName });
+  res.json(result);
+});
 
-- `GEMINI_API_KEY` optional; if present, backend AI responses use Gemini.
-- Otherwise the system falls back to local heuristic analysis.
+app.post('/api/review', async (req, res) => {
+  const { code = '', language = 'python' } = req.body || {};
+  const result = await generateReview({ code, language });
+  res.json(result);
+});
 
-## Notes
+app.post('/api/explain', async (req, res) => {
+  const { code = '', language = 'python' } = req.body || {};
+  const result = await generateExplanation({ code, language });
+  res.json(result);
+});
 
-This project is designed to run as a secure web app and uses local sandboxed execution for commonly available interpreters and compilers. Untrusted code should never be run on a production server without a managed isolated sandbox.
+app.post('/api/convert', async (req, res) => {
+  const { code = '', sourceLanguage = 'python', targetLanguage = 'javascript' } = req.body || {};
+  const result = await convertCode({ code, sourceLanguage, targetLanguage });
+  res.json(result);
+});
+
+app.listen(PORT, () => {
+  console.log(`CodeGuru backend running on http://localhost:${PORT}`);
+});

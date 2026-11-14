@@ -1,128 +1,780 @@
-import { detectLanguage, inferPanels, inferVariables } from './lang.js';
+import { spawn } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { getRuntimeSupport } from './lang.js';
 
-export async function generateAnalysis({ code, language, fileName }) {
-  const detectedLanguage = language && language !== 'auto' ? language : detectLanguage(code, fileName || '');
-  const variables = inferVariables(code);
-  const panels = inferPanels(code);
+export async function executeCode({ code = '', language = 'python', input = '', fileName = 'main.py' }) {
+  const normalizedLanguage = (language || '').toLowerCase();
+  const runtime = getRuntimeSupport(normalizedLanguage);
 
-  const summary = `Static analysis detected ${detectedLanguage} code and identified ${variables.length} likely variable declarations. The excerpt appears to use structured programming patterns with ${panels.join(', ')} relevant views.`;
-
-  const warnings = [];
-  if ((code.match(/eval\s*\(/gi) || []).length) warnings.push('Avoid using eval-like execution to reduce risk and debugging difficulty.');
-  if ((code.match(/while\s*\(true\)/gi) || []).length) warnings.push('A true loop without a safe exit condition may risk non-terminating execution.');
-  if (detectedLanguage === 'plaintext') warnings.push('Language detection is uncertain; static analysis is a best-effort approximation.');
-
-  return {
-    language: detectedLanguage,
-    summary,
-    warnings,
-    details: [
-      `Supportability: ${detectedLanguage} is available for static analysis and may be executable when the runtime is installed.`,
-      'Execution timeline and variable tracking can be generated from the code structure.',
-      'Use isolated runtime execution for untrusted code to avoid security issues.',
-    ],
-    visualization: {
-      relevant: panels,
-      panels,
-      variables,
-    },
-    variables,
-  };
-}
-
-export async function generateReview({ code, language }) {
-  const issues = [];
-  const lowerCode = code.toLowerCase();
-  if (/print\s*\(|console\.log/.test(code)) {
-    issues.push({
-      title: 'Logging is present',
-      severity: 'low',
-      line: 1,
-      explanation: 'This code emits output during execution.',
-      whyItMatters: 'Helpful for debugging, but avoid noisy logs in production code.',
-      suggestedCorrection: 'Use structured logging or guards for production environments.',
-      correctedCode: code,
-    });
+  if (!runtime.supported) {
+    return {
+      status: 'static-analysis-only',
+      output: '',
+      stderr: `Execution for ${normalizedLanguage || 'this language'} is not supported in this environment.`,
+      executionTimeMs: 0,
+      exitCode: 0,
+      input,
+      runtimeErrors: [],
+      compilationErrors: ['Static analysis mode only: runtime unavailable.'],
+    };
   }
 
-  if (/for\s*\([^)]*;[^)]*;[^)]*\)/.test(code) || /while\s*\(true\)/.test(code)) {
-    issues.push({
-      title: 'Looping logic should be reviewed',
-      severity: 'medium',
-      line: 1,
-      explanation: 'The code contains a loop pattern that may need an exit condition or bound.',
-      whyItMatters: 'Infinite loops can block execution and consume resources.',
-      suggestedCorrection: 'Add a clear termination condition and test with representative input.',
-      correctedCode: code,
-    });
+  const workingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codeguru-'));
+  const tempFile = path.join(workingDir, fileName || `main${getExtension(normalizedLanguage)}`);
+  fs.writeFileSync(tempFile, code, 'utf8');
+
+  try {
+    if (normalizedLanguage === 'python') return runCommandSafe('python3', [tempFile], input);
+    if (normalizedLanguage === 'javascript') return runCommandSafe('node', [tempFile], input);
+    if (normalizedLanguage === 'bash') return runCommandSafe('bash', [tempFile], input);
+    if (normalizedLanguage === 'c') return runCompiledProgram('gcc', [tempFile, '-o', path.join(workingDir, 'program')], path.join(workingDir, 'program'), input);
+    if (normalizedLanguage === 'cpp') return runCompiledProgram('g++', [tempFile, '-o', path.join(workingDir, 'program')], path.join(workingDir, 'program'), input);
+    if (normalizedLanguage === 'java') return runJavaProgram(tempFile, input);
+    if (normalizedLanguage === 'go') return runCommandSafe('go', ['run', tempFile], input);
+    if (normalizedLanguage === 'rust') return runCompiledProgram('rustc', [tempFile, '-o', path.join(workingDir, 'program')], path.join(workingDir, 'program'), input);
+    if (normalizedLanguage === 'php') return runCommandSafe('php', [tempFile], input);
+    if (normalizedLanguage === 'ruby') return runCommandSafe('ruby', [tempFile], input);
+
+    return {
+      status: 'static-analysis-only',
+      output: '',
+      stderr: `This language is known but no secure runner is configured for ${normalizedLanguage}.`,
+      executionTimeMs: 0,
+      exitCode: 0,
+      input,
+      runtimeErrors: [],
+      compilationErrors: ['Static analysis only.'],
+    };
+  } finally {
+    fs.rmSync(workingDir, { recursive: true, force: true });
   }
+}
 
-  if (lowerCode.includes('eval') || lowerCode.includes('exec')) {
-    issues.push({
-      title: 'Command execution or dynamic evaluation',
-      severity: 'high',
-      line: 1,
-      explanation: 'Dynamic code execution can be dangerous and difficult to audit.',
-      whyItMatters: 'It increases the risk of code injection and unpredictable runtime behavior.',
-      suggestedCorrection: 'Prefer explicit parsing, validated input, or safer APIs.',
-      correctedCode: code.replace(/eval\s*\(|exec\s*\(/gi, '// Removed unsafe dynamic execution'),
+function getExtension(language) {
+  const map = {
+    python: '.py',
+    javascript: '.js',
+    bash: '.sh',
+    c: '.c',
+    cpp: '.cpp',
+    java: '.java',
+    go: '.go',
+    rust: '.rs',
+    php: '.php',
+    ruby: '.rb',
+  };
+  return map[language] || '.txt';
+}
+
+function runCommandSafe(command, args, input) {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    let stdout = '';
+    let stderr = '';
+    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+
+    const timeout = setTimeout(() => {
+      child.kill('SIGKILL');
+      resolve({
+        status: 'timed-out',
+        output: stdout,
+        stderr: 'Execution timed out after the configured timeout.',
+        exitCode: 124,
+        executionTimeMs: Date.now() - start,
+        input,
+        runtimeErrors: ['Execution timed out.'],
+        compilationErrors: [],
+      });
+    }, 5000);
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
     });
-  }
 
-  return {
-    qualityScore: issues.length === 0 ? 92 : Math.max(52, 100 - issues.length * 12),
-    summary: `Static inspection reviewed ${language || 'unknown'} code and identified ${issues.length} notable concerns. No definitive runtime bug was proven without execution and full context.`,
-    issues,
-  };
-}
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
 
-export async function generateExplanation({ code, language }) {
-  const overview = `This ${language || 'unknown'} program is being explained as a sequence of operations. The parser treats the code as an executable script with variables, control flow, and possible output generation.`;
+    child.on('error', (error) => {
+      clearTimeout(timeout);
+      resolve({
+        status: 'error',
+        output: stdout,
+        stderr: `${error.message}\n${stderr}`,
+        exitCode: 1,
+        executionTimeMs: Date.now() - start,
+        input,
+        runtimeErrors: [error.message],
+        compilationErrors: [stderr || error.message],
+      });
+    });
 
-  const steps = [
-    'The program starts execution at the first statement.',
-    'Values are assigned and variables are tracked in the current scope.',
-    'Conditional checks and loops modify the execution path.',
-    'Output is generated for console or standard output.',
-    'The final result is returned or displayed to the user.',
-  ];
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      resolve({
+        status: code === 0 ? 'success' : 'failed',
+        output: stdout,
+        stderr,
+        exitCode: code ?? 0,
+        executionTimeMs: Date.now() - start,
+        input,
+        runtimeErrors: code === 0 ? [] : [stderr || 'Runtime error'],
+        compilationErrors: stderr ? [stderr] : [],
+      });
+    });
 
-  return { overview, steps };
-}
-
-export async function convertCode({ code, sourceLanguage, targetLanguage }) {
-  const cleaned = code.trim();
-  const conversions = {
-    'python->javascript': 'console.log("Converted from Python to JavaScript");\n',
-    'javascript->python': 'print("Converted from JavaScript to Python")\n',
-    'java->python': 'print("Converted from Java to Python")\n',
-    'c->python': 'print("Converted from C to Python")\n',
-    'cpp->java': 'public class Main { public static void main(String[] args) { System.out.println("Converted from C++ to Java"); } }\n',
-  };
-
-  const key = `${sourceLanguage}->${targetLanguage}`.toLowerCase();
-  const converted = conversions[key] || `// Converted from ${sourceLanguage} to ${targetLanguage}\n${cleaned}\n`;
-
-  return {
-    note: `Heuristic conversion prepared from ${sourceLanguage} to ${targetLanguage}. Gemini-backed conversion can be enabled by adding a GEMINI_API_KEY.`,
-    convertedCode: converted,
-  };
-}
-
-export async function maybeGeminiRequest({ prompt, systemPrompt, model = 'gemini-1.5-flash' }) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
-
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      systemInstruction: systemPrompt,
-    }),
+    if (input) {
+      child.stdin.write(input);
+    }
+    child.stdin.end();
   });
-
-  if (!response.ok) return null;
-  const data = await response.json();
-  return data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
 }
+
+async function runCompiledProgram(compiler, compileArgs, outputPath, input) {
+  const compileResult = await runCommandSafe(compiler, compileArgs, '');
+  if (compileResult.exitCode !== 0) {
+    return { ...compileResult, status: 'compile-error', input, runtimeErrors: compileResult.runtimeErrors || [], compilationErrors: compileResult.stderr ? [compileResult.stderr] : [] };
+  }
+
+  return runCommandSafe(outputPath, [], input);
+}
+
+async function runJavaProgram(filePath, input) {
+  const dir = path.dirname(filePath);
+  const className = path.basename(filePath, '.java');
+  const compileResult = await runCommandSafe('javac', [filePath], '');
+  if (compileResult.exitCode !== 0) {
+    return { ...compileResult, status: 'compile-error', input, runtimeErrors: compileResult.runtimeErrors || [], compilationErrors: compileResult.stderr ? [compileResult.stderr] : [] };
+  }
+
+  return runCommandSafe('java', ['-cp', dir, className], input);
+}
+
+export default executeCode;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\n

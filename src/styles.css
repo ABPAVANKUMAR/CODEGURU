@@ -1,31 +1,44 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Editor from '@monaco-editor/react';
 
+const navItems = [
+  'Dashboard',
+  'Universal Code Editor',
+  'Code Converter',
+  'Code Execution',
+  'Visualize Code',
+  'Memory Visualizer',
+  'Data Structure Visualizer',
+  'AI Code Reviewer',
+  'AI Code Explainer',
+  'Learning Playground',
+];
+
 const languageOptions = [
   { label: 'Auto Detect', value: 'auto' },
   { label: 'Python', value: 'python' },
-  { label: 'JavaScript', value: 'javascript' },
-  { label: 'TypeScript', value: 'typescript' },
-  { label: 'Java', value: 'java' },
   { label: 'C', value: 'c' },
   { label: 'C++', value: 'cpp' },
+  { label: 'Java', value: 'java' },
+  { label: 'JavaScript', value: 'javascript' },
+  { label: 'TypeScript', value: 'typescript' },
+  { label: 'HTML', value: 'html' },
+  { label: 'CSS', value: 'css' },
+  { label: 'PHP', value: 'php' },
   { label: 'C#', value: 'csharp' },
   { label: 'Go', value: 'go' },
   { label: 'Rust', value: 'rust' },
   { label: 'Ruby', value: 'ruby' },
-  { label: 'PHP', value: 'php' },
-  { label: 'HTML', value: 'html' },
-  { label: 'CSS', value: 'css' },
-  { label: 'SQL', value: 'sql' },
-  { label: 'JSON', value: 'json' },
-  { label: 'Bash', value: 'bash' },
-  { label: 'PowerShell', value: 'powershell' },
-  { label: 'Swift', value: 'swift' },
   { label: 'Kotlin', value: 'kotlin' },
+  { label: 'Swift', value: 'swift' },
+  { label: 'SQL', value: 'sql' },
   { label: 'R', value: 'r' },
   { label: 'Dart', value: 'dart' },
-  { label: 'YAML', value: 'yaml' },
+  { label: 'Bash', value: 'bash' },
+  { label: 'PowerShell', value: 'powershell' },
+  { label: 'JSON', value: 'json' },
   { label: 'XML', value: 'xml' },
+  { label: 'YAML', value: 'yaml' },
   { label: 'MATLAB', value: 'matlab' },
 ];
 
@@ -44,40 +57,27 @@ for i in range(3):
   {
     name: 'main.js',
     language: 'javascript',
-    content: `const numbers = [1, 2, 3, 4];
-const doubled = numbers.map((n) => n * 2);
+    content: `const values = [1, 2, 3, 4];
+const doubled = values.map((n) => n * 2);
 console.log(doubled.join(', '));
 `,
   },
 ];
 
-const navItems = [
-  'Dashboard',
-  'Universal Code Editor',
-  'Code Converter',
-  'Code Execution',
-  'Visualize Code',
-  'Memory Visualizer',
-  'Data Structure Visualizer',
-  'AI Code Reviewer',
-  'AI Code Explainer',
-  'Learning Playground',
-];
-
-const formatDate = (value) => new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const formatTime = (value) => new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 function App() {
   const [files, setFiles] = useState(defaultFiles);
   const [activeFileName, setActiveFileName] = useState(defaultFiles[0].name);
-  const [selectedLanguage, setSelectedLanguage] = useState('python');
   const [activeTab, setActiveTab] = useState('Dashboard');
+  const [selectedLanguage, setSelectedLanguage] = useState('python');
   const [loading, setLoading] = useState(false);
   const [analyzeResult, setAnalyzeResult] = useState(null);
   const [executionResult, setExecutionResult] = useState(null);
   const [reviewResult, setReviewResult] = useState(null);
   const [explainResult, setExplainResult] = useState(null);
-  const [visualizationResult, setVisualizationResult] = useState(null);
   const [convertResult, setConvertResult] = useState(null);
+  const [visualizationResult, setVisualizationResult] = useState(null);
   const [inputText, setInputText] = useState('');
   const [expectedOutput, setExpectedOutput] = useState('');
 
@@ -87,11 +87,19 @@ function App() {
   );
 
   useEffect(() => {
-    if (activeFile) {
-      setSelectedLanguage(activeFile.language);
-      handleAnalyze(activeFile.content, activeFile.language, activeFile.name);
-    }
+    if (!activeFile) return;
+    setSelectedLanguage(activeFile.language);
+    handleAnalyze(activeFile.content, activeFile.language, activeFile.name);
   }, [activeFileName]);
+
+  const setFileLanguage = (language) => {
+    setSelectedLanguage(language);
+    setFiles((prev) =>
+      prev.map((file) =>
+        file.name === activeFileName ? { ...file, language } : file
+      )
+    );
+  };
 
   const updateActiveFileContent = (value) => {
     setFiles((prev) =>
@@ -127,23 +135,17 @@ function App() {
   const handleUpload = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
-
     const text = await file.text();
-    const ext = file.name.split('.').pop()?.toLowerCase() || 'txt';
-    const language = extToLanguage(ext);
-    const newFile = {
-      name: file.name,
-      language,
-      content: text,
-    };
-
+    const extension = (file.name.split('.').pop() || '').toLowerCase();
+    const language = extToLanguage(extension);
+    const newFile = { name: file.name, language, content: text };
     setFiles((prev) => [...prev, newFile]);
     setActiveFileName(file.name);
-    setSelectedLanguage(language);
+    setFileLanguage(language);
     event.target.value = '';
   };
 
-  const handleAnalyze = async (code, language = selectedLanguage, fileName = activeFile?.name) => {
+  const handleAnalyze = async (code, language = activeFile?.language || 'python', fileName = activeFile?.name || 'main.py') => {
     try {
       setLoading(true);
       const response = await fetch('/api/analyze', {
@@ -156,15 +158,14 @@ function App() {
       setVisualizationResult(data.visualization || null);
     } catch (error) {
       setAnalyzeResult({
-        language: language || 'unknown',
-        summary: 'Static analysis fallback mode.',
-        warnings: ['Unable to reach backend. Using local fallback analysis.'],
-        details: ['This is a local demo fallback.'],
-        visualization: {
-          panels: ['Variable Tracking', 'Execution Timeline'],
-          relevant: ['loop', 'function'],
-        },
+        language,
+        summary: 'Static analysis fallback mode activated.',
+        warnings: ['Backend not reachable. Using local fallback analysis.'],
+        details: ['This is a client-side demo approximation.'],
+        visualization: { panels: ['Execution Timeline', 'Variable Tracking'], relevant: ['loop', 'function'] },
+        variables: [{ name: 'result', type: 'local', value: 'demo', scope: 'function' }],
       });
+      setVisualizationResult({ panels: ['Execution Timeline', 'Variable Tracking'], relevant: ['loop', 'function'] });
     } finally {
       setLoading(false);
     }
@@ -189,7 +190,10 @@ function App() {
         status: 'error',
         output: '',
         stderr: 'Execution service unavailable.',
-        runtimeErrors: ['Local execution service unavailable.'],
+        exitCode: 1,
+        executionTimeMs: 0,
+        input: inputText,
+        runtimeErrors: ['Unable to call backend execution service.'],
         compilationErrors: [],
       });
     }
@@ -206,9 +210,17 @@ function App() {
       setReviewResult(data);
     } catch (error) {
       setReviewResult({
-        issues: [{ title: 'Static review unavailable', severity: 'low', line: 1, explanation: 'Backend not reachable.' }],
-        summary: 'Fallback analysis used.',
-        qualityScore: 75,
+        summary: 'Fallback review mode executed.',
+        qualityScore: 82,
+        issues: [{
+          title: 'Static review fallback',
+          severity: 'low',
+          line: 1,
+          explanation: 'Backend review endpoint is unavailable in this demo environment.',
+          whyItMatters: 'Review is not definitive without live analysis.',
+          suggestedCorrection: 'Connect this app to an AI backend or static analyzer service.',
+          correctedCode: activeFile.content,
+        }],
       });
     }
   };
@@ -224,15 +236,19 @@ function App() {
       setExplainResult(data);
     } catch (error) {
       setExplainResult({
-        overview: 'This is a local fallback explanation.',
-        steps: ['The code initializes variables.', 'It performs operations sequentially.', 'It prints or returns the result.'],
+        overview: 'This demo uses static explanation guidance for learning and teaching.',
+        steps: [
+          'The program starts from the first statement.',
+          'Variables are created and updated during execution.',
+          'The result is printed or returned when the program ends.'
+        ],
       });
     }
   };
 
   const handleConvert = async () => {
     try {
-      const targetLanguage = selectedLanguage === 'auto' ? redactLanguage(activeFile.language) : selectedLanguage;
+      const targetLanguage = selectedLanguage === 'auto' ? activeFile.language : selectedLanguage;
       const response = await fetch('/api/convert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -246,296 +262,10 @@ function App() {
       setConvertResult(data);
     } catch (error) {
       setConvertResult({
+        note: 'AI conversion fallback mode activated.',
         convertedCode: activeFile.content,
-        note: 'AI conversion fallback unavailable. This demo preserves source code for manual review.',
       });
     }
-  };
-
-  const renderDashboard = () => (
-    <section className="panel">
-      <div className="hero-block">
-        <span className="eyebrow">CodeGuru</span>
-        <h2>Write. Convert. Execute. Visualize. Review.</h2>
-        <p>
-          Universal AI programming platform for multi-language development, runtime analysis, execution tracing, and intelligent learning.
-        </p>
-      </div>
-      <div className="stat-grid">
-        <div className="stat-card">
-          <strong>{languageOptions.length - 1}</strong>
-          <span>Languages Supported</span>
-        </div>
-        <div className="stat-card">
-          <strong>{files.length}</strong>
-          <span>Files Open</span>
-        </div>
-        <div className="stat-card">
-          <strong>{executionResult ? 'Ready' : 'Idle'}</strong>
-          <span>Execution State</span>
-        </div>
-        <div className="stat-card">
-          <strong>{reviewResult ? 'AI Reviewed' : 'Awaiting Review'}</strong>
-          <span>Code Quality</span>
-        </div>
-      </div>
-    </section>
-  );
-
-  const renderEditor = () => (
-    <section className="panel editor-panel">
-      <div className="toolbar">
-        <div className="file-tabs">
-          {files.map((file) => (
-            <button
-              key={file.name}
-              className={activeFileName === file.name ? 'tab active' : 'tab'}
-              onClick={() => setActiveFileName(file.name)}
-            >
-              {file.name}
-            </button>
-          ))}
-          <button className="secondary" onClick={addFile}>+ New File</button>
-        </div>
-
-        <div className="editor-actions">
-          <select value={selectedLanguage} onChange={(e) => setSelectedLanguage(e.target.value)}>
-            {languageOptions.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-          <input type="file" onChange={handleUpload} hidden id="upload-file" />
-          <label htmlFor="upload-file" className="button">Upload</label>
-          <button onClick={handleDownload}>Download</button>
-          <button className="primary" onClick={handleExecute}>Run</button>
-        </div>
-      </div>
-
-      <div className="editor-wrap">
-        <Editor
-          height="440px"
-          language={toMonacoLanguage(activeFile.language)}
-          theme="vs-light"
-          value={activeFile.content}
-          options={{
-            minimap: { enabled: false },
-            fontSize: 14,
-            wordWrap: 'on',
-            lineNumbers: 'on',
-            automaticLayout: true,
-            suggestOnTriggerCharacters: true,
-            formatOnPaste: true,
-            formatOnType: true,
-            tabSize: 2,
-          }}
-          onChange={(value) => updateActiveFileContent(value || '')}
-        />
-      </div>
-
-      <div className="input-output-grid">
-        <div className="mini-panel">
-          <h4>Standard Input</h4>
-          <textarea value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder="Enter input for the program" />
-        </div>
-        <div className="mini-panel">
-          <h4>Expected Output</h4>
-          <textarea value={expectedOutput} onChange={(e) => setExpectedOutput(e.target.value)} placeholder="Optional expected output for comparison" />
-        </div>
-      </div>
-    </section>
-  );
-
-  const renderAnalysis = () => (
-    <section className="panel split-panel">
-      <div>
-        <h3>Code Analysis</h3>
-        {loading ? <p>Analyzing code...</p> : null}
-        {analyzeResult ? (
-          <>
-            <p><strong>Detected language:</strong> {analyzeResult.language}</p>
-            <p><strong>Summary:</strong> {analyzeResult.summary}</p>
-            <ul>
-              {analyzeResult.warnings?.map((warning, index) => <li key={index}>{warning}</li>)}
-            </ul>
-            {analyzeResult.details?.length ? (
-              <ul>
-                {analyzeResult.details.map((detail, index) => <li key={index}>{detail}</li>)}
-              </ul>
-            ) : null}
-          </>
-        ) : null}
-      </div>
-      <div>
-        <h3>Visualization Selector</h3>
-        <ul>
-          {(visualizationResult?.panels || ['Loop Execution', 'Function Call Stack']).map((panel, index) => (
-            <li key={index}>{panel}</li>
-          ))}
-        </ul>
-      </div>
-    </section>
-  );
-
-  const renderExecution = () => (
-    <section className="panel">
-      <div className="section-header">
-        <h3>Execution</h3>
-        <button className="primary" onClick={handleExecute}>Run Code</button>
-      </div>
-
-      {executionResult ? (
-        <div className="execution-grid">
-          <div className="mini-panel">
-            <h4>Program Output</h4>
-            <pre>{executionResult.output || '(no output)'}</pre>
-          </div>
-          <div className="mini-panel">
-            <h4>Errors</h4>
-            <pre>{executionResult.stderr || executionResult.runtimeErrors?.join('\n') || 'No runtime errors'}</pre>
-          </div>
-          <div className="mini-panel">
-            <h4>Status & Timing</h4>
-            <ul>
-              <li>Status: {executionResult.status}</li>
-              <li>Exit Code: {executionResult.exitCode}</li>
-              <li>Execution Time: {executionResult.executionTimeMs} ms</li>
-              <li>Input: {executionResult.input || '(none)'}</li>
-            </ul>
-          </div>
-          <div className="mini-panel">
-            <h4>Comparison</h4>
-            <p>Expected: {expectedOutput || '(not provided)'}</p>
-            <p>Actual: {executionResult.output || '(no output)'}</p>
-          </div>
-        </div>
-      ) : (
-        <p>No execution yet. Click Run Code to compile and run.</p>
-      )}
-    </section>
-  );
-
-  const renderReview = () => (
-    <section className="panel">
-      <div className="section-header">
-        <h3>AI Code Review</h3>
-        <button className="primary" onClick={handleReview}>Review Code</button>
-      </div>
-      {reviewResult ? (
-        <>
-          <p><strong>Quality score:</strong> {reviewResult.qualityScore}/100</p>
-          <p><strong>Summary:</strong> {reviewResult.summary}</p>
-          <ul>
-            {reviewResult.issues?.map((issue, index) => (
-              <li key={index}>
-                <strong>{issue.title}</strong> ({issue.severity}) at line {issue.line}: {issue.explanation}
-              </li>
-            ))}
-          </ul>
-        </>
-      ) : (
-        <p>Review results will appear here.</p>
-      )}
-    </section>
-  );
-
-  const renderExplain = () => (
-    <section className="panel">
-      <div className="section-header">
-        <h3>AI Code Explainer</h3>
-        <button className="primary" onClick={handleExplain}>Explain</button>
-      </div>
-      {explainResult ? (
-        <>
-          <p>{explainResult.overview}</p>
-          <ol>
-            {explainResult.steps?.map((step, index) => <li key={index}>{step}</li>)}
-          </ol>
-        </>
-      ) : (
-        <p>Explain My Code results will appear here.</p>
-      )}
-    </section>
-  );
-
-  const renderConverter = () => (
-    <section className="panel">
-      <div className="section-header">
-        <h3>Universal Code Converter</h3>
-        <button className="primary" onClick={handleConvert}>Convert</button>
-      </div>
-      {convertResult ? (
-        <>
-          <p>{convertResult.note || 'Conversion completed.'}</p>
-          <pre>{convertResult.convertedCode || activeFile.content}</pre>
-        </>
-      ) : (
-        <p>Select a target language and convert the code.</p>
-      )}
-    </section>
-  );
-
-  const renderMemory = () => (
-    <section className="panel">
-      <h3>Memory Visualizer</h3>
-      <div className="memory-table">
-        <div className="memory-row header">
-          <span>Type</span>
-          <span>Name</span>
-          <span>Value</span>
-          <span>Scope</span>
-        </div>
-        {analyzeResult?.variables?.map((variable, index) => (
-          <div className="memory-row" key={index}>
-            <span>{variable.type}</span>
-            <span>{variable.name}</span>
-            <span>{variable.value}</span>
-            <span>{variable.scope}</span>
-          </div>
-        )) || (
-          <div className="memory-row">
-            <span>local</span>
-            <span>result</span>
-            <span>demo</span>
-            <span>function</span>
-          </div>
-        )}
-      </div>
-    </section>
-  );
-
-  const renderDataStructure = () => (
-    <section className="panel">
-      <h3>Data Structure Visualizer</h3>
-      <ul>
-        {['Linked List', 'Stack', 'Queue', 'Tree', 'Graph'].map((item) => (
-          <li key={item}>{item}</li>
-        ))}
-      </ul>
-    </section>
-  );
-
-  const renderLearning = () => (
-    <section className="panel">
-      <h3>Learning Playground</h3>
-      <ul>
-        <li>Trace the execution flow line by line.</li>
-        <li>Compare output after code conversion.</li>
-        <li>Explore a visualized memory timeline.</li>
-      </ul>
-    </section>
-  );
-
-  const pageMap = {
-    Dashboard: renderDashboard(),
-    'Universal Code Editor': <>{renderEditor()}{renderAnalysis()}</>,
-    'Code Converter': renderConverter(),
-    'Code Execution': renderExecution(),
-    'Visualize Code': renderAnalysis(),
-    'Memory Visualizer': renderMemory(),
-    'Data Structure Visualizer': renderDataStructure(),
-    'AI Code Reviewer': renderReview(),
-    'AI Code Explainer': renderExplain(),
-    'Learning Playground': renderLearning(),
   };
 
   return (
@@ -549,7 +279,7 @@ function App() {
           </div>
         </div>
 
-        <nav>
+        <nav className="nav-list">
           {navItems.map((item) => (
             <button
               key={item}
@@ -566,7 +296,7 @@ function App() {
         <header className="topbar">
           <div>
             <h1>{activeTab}</h1>
-            <small>{formatDate(new Date().toISOString())}</small>
+            <small>{formatTime(new Date().toISOString())}</small>
           </div>
           <div className="header-actions">
             <button className="secondary" onClick={() => handleAnalyze(activeFile.content, activeFile.language, activeFile.name)}>Analyze</button>
@@ -574,7 +304,265 @@ function App() {
           </div>
         </header>
 
-        {pageMap[activeTab]}
+        {activeTab === 'Dashboard' && (
+          <section className="panel">
+            <div className="hero-block">
+              <span className="eyebrow">CodeGuru</span>
+              <h2>Write. Convert. Execute. Visualize. Review.</h2>
+              <p>
+                A universal AI programming platform to analyze, explain, convert, execute, and visualize code across multiple languages.
+              </p>
+            </div>
+            <div className="stat-grid">
+              <div className="stat-card"><strong>{languageOptions.length - 1}</strong><span>Languages</span></div>
+              <div className="stat-card"><strong>{files.length}</strong><span>Open files</span></div>
+              <div className="stat-card"><strong>{executionResult ? 'Ready' : 'Idle'}</strong><span>Execution</span></div>
+              <div className="stat-card"><strong>{reviewResult ? 'AI Reviewed' : 'Awaiting'}</strong><span>Code review</span></div>
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'Universal Code Editor' && (
+          <>
+            <section className="panel editor-panel">
+              <div className="toolbar">
+                <div className="file-tabs">
+                  {files.map((file) => (
+                    <button
+                      key={file.name}
+                      className={activeFileName === file.name ? 'tab active' : 'tab'}
+                      onClick={() => setActiveFileName(file.name)}
+                    >
+                      {file.name}
+                    </button>
+                  ))}
+                  <button className="secondary" onClick={addFile}>+ New File</button>
+                </div>
+
+                <div className="editor-actions">
+                  <select value={selectedLanguage} onChange={(e) => setFileLanguage(e.target.value)}>
+                    {languageOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                  <input type="file" onChange={handleUpload} hidden id="upload-file" />
+                  <label htmlFor="upload-file" className="button-like">Upload</label>
+                  <button onClick={handleDownload}>Download</button>
+                  <button className="primary" onClick={handleExecute}>Run</button>
+                </div>
+              </div>
+
+              <div className="editor-wrap">
+                <Editor
+                  height="440px"
+                  theme="vs-light"
+                  language={toMonacoLanguage(activeFile.language)}
+                  value={activeFile.content}
+                  options={{
+                    lineNumbers: 'on',
+                    minimap: { enabled: false },
+                    fontSize: 14,
+                    wordWrap: 'on',
+                    automaticLayout: true,
+                    formatOnPaste: true,
+                    formatOnType: true,
+                    tabSize: 2,
+                    suggestOnTriggerCharacters: true,
+                  }}
+                  onChange={(value) => updateActiveFileContent(value || '')}
+                />
+              </div>
+
+              <div className="input-output-grid">
+                <div className="mini-panel">
+                  <h4>Standard Input</h4>
+                  <textarea value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder="Provide runtime input" />
+                </div>
+                <div className="mini-panel">
+                  <h4>Expected Output</h4>
+                  <textarea value={expectedOutput} onChange={(e) => setExpectedOutput(e.target.value)} placeholder="Optional expected output" />
+                </div>
+              </div>
+            </section>
+
+            <section className="panel split-panel">
+              <div>
+                <h3>Code analysis</h3>
+                {loading ? <p>Analyzing code...</p> : null}
+                {analyzeResult ? (
+                  <>
+                    <p><strong>Detected language:</strong> {analyzeResult.language}</p>
+                    <p><strong>Summary:</strong> {analyzeResult.summary}</p>
+                    <ul>
+                      {analyzeResult.warnings?.map((warning, index) => <li key={index}>{warning}</li>)}
+                    </ul>
+                    {analyzeResult.details?.length ? (
+                      <ul>
+                        {analyzeResult.details.map((detail, index) => <li key={index}>{detail}</li>)}
+                      </ul>
+                    ) : null}
+                  </>
+                ) : <p>Run analysis to inspect the submitted code.</p>}
+              </div>
+              <div>
+                <h3>Visualization selector</h3>
+                <ul>
+                  {(visualizationResult?.panels || ['Execution Timeline', 'Variable Tracking']).map((panel, index) => (
+                    <li key={index}>{panel}</li>
+                  ))}
+                </ul>
+              </div>
+            </section>
+          </>
+        )}
+
+        {activeTab === 'Code Execution' && (
+          <section className="panel">
+            <div className="section-header">
+              <h3>Execution</h3>
+              <button className="primary" onClick={handleExecute}>Run Code</button>
+            </div>
+
+            {executionResult ? (
+              <div className="execution-grid">
+                <div className="mini-panel">
+                  <h4>Program output</h4>
+                  <pre>{executionResult.output || '(no output)'}</pre>
+                </div>
+                <div className="mini-panel">
+                  <h4>Errors</h4>
+                  <pre>{executionResult.stderr || executionResult.runtimeErrors?.join('\n') || 'No runtime errors'}</pre>
+                </div>
+                <div className="mini-panel">
+                  <h4>Status & timing</h4>
+                  <ul>
+                    <li>Status: {executionResult.status}</li>
+                    <li>Exit code: {executionResult.exitCode}</li>
+                    <li>Runtime: {executionResult.executionTimeMs} ms</li>
+                    <li>Input: {executionResult.input || '(none)'}</li>
+                  </ul>
+                </div>
+                <div className="mini-panel">
+                  <h4>Expected vs actual</h4>
+                  <p>Expected: {expectedOutput || '(not provided)'}</p>
+                  <p>Actual: {executionResult.output || '(no output)'}</p>
+                </div>
+              </div>
+            ) : (
+              <p>No execution yet. Click Run Code to execute the active file.</p>
+            )}
+          </section>
+        )}
+
+        {activeTab === 'Code Converter' && (
+          <section className="panel">
+            <div className="section-header">
+              <h3>Universal Code Converter</h3>
+              <button className="primary" onClick={handleConvert}>Convert</button>
+            </div>
+            {convertResult ? (
+              <>
+                <p>{convertResult.note || 'Conversion completed.'}</p>
+                <pre>{convertResult.convertedCode || activeFile.content}</pre>
+              </>
+            ) : (
+              <p>Select a language and convert the current source.</p>
+            )}
+          </section>
+        )}
+
+        {activeTab === 'Visualize Code' && (
+          <section className="panel">
+            <h3>Execution visualization</h3>
+            <ul>
+              {(visualizationResult?.panels || ['Function call stack', 'Control flow', 'Memory state']).map((panel, index) => (
+                <li key={index}>{panel}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {activeTab === 'Memory Visualizer' && (
+          <section className="panel">
+            <h3>Memory visualizer</h3>
+            <div className="memory-table">
+              <div className="memory-row header">
+                <span>Type</span>
+                <span>Name</span>
+                <span>Value</span>
+                <span>Scope</span>
+              </div>
+              {(analyzeResult?.variables || [{ name: 'result', type: 'local', value: 'demo', scope: 'function' }]).map((variable, index) => (
+                <div key={index} className="memory-row">
+                  <span>{variable.type || 'local'}</span>
+                  <span>{variable.name || 'result'}</span>
+                  <span>{variable.value || 'demo'}</span>
+                  <span>{variable.scope || 'function'}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'Data Structure Visualizer' && (
+          <section className="panel">
+            <h3>Data structure visualizer</h3>
+            <ul>
+              {['Linked list', 'Stack', 'Queue', 'Tree', 'Graph', 'Hash map'].map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {activeTab === 'AI Code Reviewer' && (
+          <section className="panel">
+            <div className="section-header">
+              <h3>AI Code Reviewer</h3>
+              <button className="primary" onClick={handleReview}>Review</button>
+            </div>
+            {reviewResult ? (
+              <>
+                <p><strong>Quality score:</strong> {reviewResult.qualityScore}/100</p>
+                <p><strong>Summary:</strong> {reviewResult.summary}</p>
+                <ul>
+                  {reviewResult.issues?.map((issue, index) => (
+                    <li key={index}><strong>{issue.title}</strong> ({issue.severity}) at line {issue.line}: {issue.explanation}</li>
+                  ))}
+                </ul>
+              </>
+            ) : <p>Review results will appear here.</p>}
+          </section>
+        )}
+
+        {activeTab === 'AI Code Explainer' && (
+          <section className="panel">
+            <div className="section-header">
+              <h3>AI Code Explainer</h3>
+              <button className="primary" onClick={handleExplain}>Explain</button>
+            </div>
+            {explainResult ? (
+              <>
+                <p>{explainResult.overview}</p>
+                <ol>
+                  {explainResult.steps?.map((step, index) => <li key={index}>{step}</li>)}
+                </ol>
+              </>
+            ) : <p>Explain results will appear here.</p>}
+          </section>
+        )}
+
+        {activeTab === 'Learning Playground' && (
+          <section className="panel">
+            <h3>Learning Playground</h3>
+            <ul>
+              <li>Trace control flow step by step.</li>
+              <li>Compare source-to-source conversion output.</li>
+              <li>Study variable state and memory evolution.</li>
+              <li>Practice with multiple example programs.</li>
+            </ul>
+          </section>
+        )}
       </main>
     </div>
   );
@@ -607,11 +595,10 @@ function toMonacoLanguage(language) {
     xml: 'xml',
     matlab: 'plaintext',
   };
-
   return map[language] || 'plaintext';
 }
 
-function extToLanguage(ext) {
+function extToLanguage(extension) {
   const map = {
     py: 'python',
     js: 'javascript',
@@ -619,7 +606,6 @@ function extToLanguage(ext) {
     java: 'java',
     c: 'c',
     cpp: 'cpp',
-    h: 'cpp',
     cs: 'csharp',
     go: 'go',
     rs: 'rust',
@@ -640,12 +626,7 @@ function extToLanguage(ext) {
     xml: 'xml',
     m: 'matlab',
   };
-
-  return map[ext] || 'plaintext';
-}
-
-function redactLanguage(language) {
-  return language || 'python';
+  return map[extension] || 'plaintext';
 }
 
 export default App;
