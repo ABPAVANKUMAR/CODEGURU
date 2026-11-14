@@ -1,29 +1,5 @@
-# CodeGuru
-
-CodeGuru is a universal AI-powered programming platform for writing, converting, executing, visualizing, explaining, and reviewing code across multiple languages.
-
-## Features
-
-- Monaco-based universal code editor with multi-file support
-- Automatic language detection and manual language selection
-- AI-assisted code analysis and review
-- Secure execution pipeline for supported runtime environments
-- Runtime output, errors, timing, and exit status reporting
-- Visualization panels for execution flow, memory, and data structures
-- Multi-language conversion workflow with safe fallback handling
-
-## Getting started
-
-```bash
-npm install
-cp .env.example .env
-npm run dev
-```
-
-Then open the app at `http://localhost:5173`.
-
-## Notes
-
-- The backend can optionally call Gemini if `GEMINI_API_KEY` is set.
-- If the API key is not available, the app falls back to local heuristics and static explanations.
-- Untrusted code should only be executed in an isolated sandbox environment.
+node_modules
+.env
+dist
+.vite
+*.log
