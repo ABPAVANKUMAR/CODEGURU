@@ -1,3 +1,5 @@
+import express from 'express';
+import cors from 'cors';
 import { analyzeSource } from './utils/analysis.js';
 import { runGeminiTask } from './utils/gemini.js';
 import { executeOnJudge0, getJudge0Languages, isJudge0Configured } from './utils/judge0.js';
@@ -5,7 +7,18 @@ import { executeOnJudge0, getJudge0Languages, isJudge0Configured } from './utils
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
-  app.use(cors({ origin: process.env.CORS_ORIGIN || true }));
+
+  const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  app.use(cors({
+    origin(origin, callback) {
+      // Same-origin requests generally omit Origin. Allow local clients and explicitly configured origins.
+      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error('Origin is not allowed by CodeGuru CORS configuration.'));
+    },
+  }));
   app.use(express.json({ limit: '256kb' }));
 
   function codeFrom(req, res) {
@@ -21,29 +34,28 @@ export function createApp() {
     return code;
   }
 
-  app.get('/api/health', (_req, res) => res.json({
+  app.get(['/api/health', '/health'], (_req, res) => res.json({
     ok: true,
     service: 'CodeGuru API',
     providers: { execution: isJudge0Configured(), ai: Boolean(process.env.GEMINI_API_KEY) },
   }));
 
-  app.get('/api/languages', async (_req, res) => {
+  app.get(['/api/languages', '/languages'], async (_req, res) => {
     try {
       const languages = await getJudge0Languages();
       res.json({ configured: isJudge0Configured(), provider: 'Judge0 CE', languages });
     } catch (error) {
-      res.status(502).json({ error: error.message, configured: isJudge0Configured(), languages: [] });
+      res.status(error.statusCode || 502).json({ error: error.message, configured: isJudge0Configured(), languages: [] });
     }
   });
 
-  app.post('/api/analyze', (req, res) => {
+  app.post(['/api/analyze', '/analyze'], (req, res) => {
     const code = codeFrom(req, res);
     if (code === null) return;
-    const result = analyzeSource(code, req.body.language || 'unknown');
-    res.json(result);
+    res.json(analyzeSource(code, req.body.language || 'unknown'));
   });
 
-  app.post('/api/execute', async (req, res) => {
+  app.post(['/api/execute', '/execute'], async (req, res) => {
     const code = codeFrom(req, res);
     if (code === null) return;
     const input = req.body.input ?? '';
@@ -52,61 +64,43 @@ export function createApp() {
       return;
     }
     try {
-      const result = await executeOnJudge0({
-        code,
-        language: req.body.language || '',
-        languageId: req.body.languageId,
-        stdin: input,
-        fileName: req.body.fileName || 'main',
-      });
+      const result = await executeOnJudge0({ code, language: req.body.language || '', languageId: req.body.languageId, stdin: input, fileName: req.body.fileName || 'main' });
       res.status(result.providerError ? 502 : 200).json(result);
     } catch (error) {
       res.status(error.statusCode || 502).json({ error: error.message, provider: 'Judge0 CE' });
     }
   });
 
-  app.post('/api/review', async (req, res) => {
+  app.post(['/api/review', '/review'], async (req, res) => {
     const code = codeFrom(req, res);
     if (code === null) return;
-    try {
-      const result = await runGeminiTask('review', { code, language: req.body.language || 'unknown' });
-      res.json(result);
-    } catch (error) {
-      res.status(error.statusCode || 502).json({ error: error.message, provider: 'Gemini' });
-    }
+    try { res.json(await runGeminiTask('review', { code, language: req.body.language || 'unknown' })); }
+    catch (error) { res.status(error.statusCode || 502).json({ error: error.message, provider: 'Gemini' }); }
   });
 
-  app.post('/api/explain', async (req, res) => {
+  app.post(['/api/explain', '/explain'], async (req, res) => {
     const code = codeFrom(req, res);
     if (code === null) return;
-    try {
-      const result = await runGeminiTask('explain', { code, language: req.body.language || 'unknown', question: req.body.question || '' });
-      res.json(result);
-    } catch (error) {
-      res.status(error.statusCode || 502).json({ error: error.message, provider: 'Gemini' });
-    }
+    try { res.json(await runGeminiTask('explain', { code, language: req.body.language || 'unknown', question: req.body.question || '' })); }
+    catch (error) { res.status(error.statusCode || 502).json({ error: error.message, provider: 'Gemini' }); }
   });
 
-  app.post('/api/convert', async (req, res) => {
+  app.post(['/api/convert', '/convert'], async (req, res) => {
     const code = codeFrom(req, res);
     if (code === null) return;
-    const sourceLanguage = req.body.sourceLanguage;
-    const targetLanguage = req.body.targetLanguage;
+    const { sourceLanguage, targetLanguage } = req.body;
     if (typeof sourceLanguage !== 'string' || typeof targetLanguage !== 'string' || !targetLanguage.trim()) {
       res.status(400).json({ error: 'Provide sourceLanguage and targetLanguage.' });
       return;
     }
-    try {
-      const result = await runGeminiTask('convert', { code, sourceLanguage, targetLanguage });
-      res.json(result);
-    } catch (error) {
-      res.status(error.statusCode || 502).json({ error: error.message, provider: 'Gemini' });
-    }
+    try { res.json(await runGeminiTask('convert', { code, sourceLanguage, targetLanguage })); }
+    catch (error) { res.status(error.statusCode || 502).json({ error: error.message, provider: 'Gemini' }); }
   });
 
   app.use((error, _req, res, _next) => {
     if (error?.type === 'entity.too.large') return res.status(413).json({ error: 'Request body is too large.' });
     if (error instanceof SyntaxError) return res.status(400).json({ error: 'Request body must be valid JSON.' });
+    if (error?.message?.includes('CORS')) return res.status(403).json({ error: error.message });
     console.error('CodeGuru API error:', error);
     return res.status(500).json({ error: 'Unexpected server error.' });
   });
